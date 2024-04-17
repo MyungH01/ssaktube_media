@@ -54,8 +54,13 @@ def aws_credentials(id_token):
 recording_configuration_arn = os.getenv('RECORDING_CONFIGURATION_ARN')
 
 # 클라이언트 생성
-ivs_client = boto3.client('ivs', region_name='ap-northeast-1')
-dynamodb = boto3.resource('dynamodb', region_name='ap-northeast-1') 
+ivs_client = boto3.client('ivs', aws_access_key_id=os.getenv('ACCESS_KEY'),
+                          aws_secret_access_key=os.getenv('SECRET_ACCESS_KEY'),
+                          region_name=os.getenv('REGION'))
+dynamodb = boto3.resource('dynamodb', 
+                          aws_access_key_id=os.getenv('ACCESS_KEY'),
+                          aws_secret_access_key=os.getenv('SECRET_ACCESS_KEY'),
+                          region_name=os.getenv('REGION')) 
 table = dynamodb.Table('userData')
 
 database_url = os.getenv('DATABASE_URL')
