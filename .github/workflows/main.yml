@@ -23,6 +23,9 @@ jobs:
         echo "RECORDING_CONFIGURATION_ARN=${{ secrets.RECORDING_CONFIGURATION_ARN }}" >> .env
         echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" >> .env
         echo "BASE_ARN=${{ secrets.BASE_ARN }}" >> .env
+        echo "ACCESS_KEY=${{ secrets.ACCESS_KEY }}" >> .env
+        echo "SECRET_ACCESS_KEY=${{ secrets.SECRET_ACCESS_KEY }}" >> .env
+        echo "REGION=${{ secrets.REGION }}" >> .env
        
 		# AWS 서비스에 접근하기 위한 크리덴셜을 설정
     - name: Configure AWS credentials
