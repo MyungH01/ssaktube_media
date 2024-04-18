@@ -510,6 +510,27 @@ async def post_replay_detail(idx: int):
         "streamname": result['streamname']
     }
 
+@app.get("/api/live/chatroom/{channelid}")
+async def create_chat_token(channelid : str):
+    response = table.query(
+            IndexName = 'channelid-index',
+            KeyConditionExpression=Key('channelid').eq(channelid),
+            ProjectionExpression='chaturl'
+    )
+    items = response.get('Items', [])
+
+    client = boto3.client('ivschat')
+
+    input = {
+            'capabilities' : ['SEND_MESSAGE','DISCONNECT_USER','DELETE_MESSAGE'],
+            'roomIdentifier' : items[0]['chaturl'],
+            'sessionDurationInMinutes' : 180,
+            'userId' : 'userId',
+        }
+
+    response_chat = client.create_chat_token(**input)
+    return ({'chatToken' : response_chat['token']})
+
 # 최근 저장된 영상 전체 다시보기 정보 20개
 @app.get("/api/replay/recent")
 async def get_recent_replay():
