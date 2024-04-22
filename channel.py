@@ -1,5 +1,6 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Response
 from pydantic import BaseModel
+from typing import Optional
 import boto3
 from botocore.exceptions import ClientError
 from boto3.dynamodb.conditions import Key
@@ -8,12 +9,31 @@ import pymysql
 from databases import Database
 from dotenv import load_dotenv
 import os
+from fastapi.responses import JSONResponse
 
 app = FastAPI()
 
 class ChannelCreate(BaseModel):
     userid: str
     id_token: str
+
+# Pydantic 모델 정의
+class FollowRequest(BaseModel):
+    userid: str
+    target_userid: str
+
+class FollowListRequest(BaseModel):
+    userid: str
+
+class boardcreate(BaseModel):
+    authorid: str
+    content : str
+
+class replycreate(BaseModel):
+    boardid: int
+    parentreplyid: Optional[int] = None 
+    authorid: str
+    reply: str
 
 load_dotenv()
 
@@ -74,6 +94,16 @@ def create_channel(body: ChannelCreate):
     channel_name = channel_dict['userid']
     id_token = channel_dict['id_token']
 
+    # DynamoDB에서 사용자 정보를 조회하여 iscensor 값을 검사
+    user_response = table.get_item(
+        Key={'userid': channel_name}
+    )
+    user_item = user_response.get('Item')
+
+    # iscensor 값이 1이면 채널 생성 중단
+    if user_item and user_item.get('iscensor', 0) == 1:
+        return {"Can't create channel"}
+
     ivs_cog_client = aws_credentials(id_token)
     # 채널 생성
     try:
@@ -132,7 +162,7 @@ async def get_live_channels():
     response = table.query(
         IndexName='isstream-index',
         KeyConditionExpression=Key('isstream').eq(1),
-        ProjectionExpression='thumbnailurl, streamurl, username, channelid, streamname, userlogo, userid'
+        ProjectionExpression='thumbnailurl, streamurl, username, channelid, streamname, userlogo, userid, category'
     )
 
     base_arn = os.getenv('BASE_ARN')
@@ -198,7 +228,7 @@ async def get_live_channels(page: int = 1, limit: int = 20):
     response = table.query(
         IndexName='isstream-index',
         KeyConditionExpression=Key('isstream').eq(1),
-        ProjectionExpression='thumbnailurl, streamurl, username, channelid, streamname, userlogo, userid'
+        ProjectionExpression='thumbnailurl, streamurl, username, channelid, streamname, userlogo, userid, category'
     )
 
     base_arn = os.getenv('BASE_ARN')
@@ -255,7 +285,7 @@ async def read_item_by_userid(userid: str):
     
     response = table.query(
         KeyConditionExpression=Key('userid').eq(userid),
-        ProjectionExpression='streamurl, streamname, username, userlogo, isstream, streamstarttime, streamendtime, userid, channelid'
+        ProjectionExpression='streamurl, streamname, username, userlogo, isstream, streamstarttime, streamendtime, userid, channelid, followers, introduce'
     )
     items = response.get('Items', [])
 
@@ -289,9 +319,9 @@ async def shutdown():
 @app.get("/api/replays")
 async def get_all_replay():
     query = """
-    SELECT idx, userid, channelid, replayurl, recordingstart, recordingend, viewercount, streamname, nickname, userlogo
+    SELECT idx, userid, channelid, replayurl, recordingstart, recordingend, viewercount, streamname, username, userlogo
     FROM replayview
-    WHERE recordingend >= date_sub(now(), interval 1 day) and  recordingend < now()
+    WHERE recordingend >= date_sub(now(), interval 7 day) and  recordingend < now()
     ORDER BY viewercount DESC
     LIMIT 60;
     """
@@ -322,7 +352,7 @@ async def post_replay_info(page: int = Query(1, gt=0), sort: str = Query('latest
     total_pages = (total_count + items_per_page - 1) // items_per_page
 
     query = f"""
-    SELECT replayurl, recordingstart, recordingend, viewercount, userid, idx, streamname, nickname, userlogo, duration
+    SELECT replayurl, recordingstart, recordingend, viewercount, userid, idx, streamname, username, userlogo, duration
     FROM vodview
     WHERE recordingstart >= date_sub(now(), interval 30 day) and  recordingstart < now() 
     {order_clause}
@@ -340,7 +370,7 @@ async def post_replay_info(page: int = Query(1, gt=0), sort: str = Query('latest
         "userid": r['userid'],
         "idx": r['idx'],
         "streamname": r['streamname'],
-        "nickname": r['nickname'],
+        "username": r['username'],
         "userlogo": r['userlogo'],
         "duration": r['duration']
     } for r in result]
@@ -369,7 +399,7 @@ async def post_replay_info(userid: str, page: int = Query(1, gt=0), sort: str = 
     total_pages = (total_count + items_per_page - 1) // items_per_page
 
     query = f"""
-    SELECT replayurl, recordingstart, recordingend, viewercount, userid, idx, streamname, nickname, duration
+    SELECT replayurl, recordingstart, recordingend, viewercount, userid, idx, streamname, username, duration
     FROM godview
     WHERE userid = :userid
     {order_clause}
@@ -387,7 +417,7 @@ async def post_replay_info(userid: str, page: int = Query(1, gt=0), sort: str = 
         "userid": r['userid'],
         "idx": r['idx'],
         "streamname": r['streamname'],
-        "nickname": r['nickname'],
+        "username": r['username'],
         "duration": r['duration']
     } for r in result]
 
@@ -412,7 +442,7 @@ async def post_replay_info(userid: str, page: int = Query(1, gt=0), sort: str = 
     total_pages = (total_count + items_per_page - 1) // items_per_page
 
     query = f"""
-    SELECT replayurl, recordingstart, recordingend, viewercount, userid, idx, streamname, nickname, duration
+    SELECT replayurl, recordingstart, recordingend, viewercount, userid, idx, streamname, username, duration
     FROM replayview
     WHERE userid = :userid
     {order_clause}
@@ -430,7 +460,7 @@ async def post_replay_info(userid: str, page: int = Query(1, gt=0), sort: str = 
         "userid": r['userid'],
         "idx": r['idx'],
         "streamname": r['streamname'],
-        "nickname": r['nickname'],
+        "username": r['username'],
         "duration": r['duration']
     } for r in result]
 
@@ -455,7 +485,7 @@ async def post_replay_info(userid: str, page: int = Query(1, gt=0), sort: str = 
     total_pages = (total_count + items_per_page - 1) // items_per_page
 
     query = f"""
-    SELECT replayurl, recordingstart, recordingend, viewercount, userid, idx, streamname, nickname, duration
+    SELECT replayurl, recordingstart, recordingend, viewercount, userid, idx, streamname, username, duration
     FROM vodview
     WHERE userid = :userid
     {order_clause}
@@ -473,7 +503,7 @@ async def post_replay_info(userid: str, page: int = Query(1, gt=0), sort: str = 
         "userid": r['userid'],
         "idx": r['idx'],
         "streamname": r['streamname'],
-        "nickname": r['nickname'],
+        "username": r['username'],
         "duration": r['duration']
     } for r in result]
 
@@ -490,7 +520,7 @@ async def post_replay_detail(idx: int):
 
     # 상세 정보 조회
     select_query = """
-    SELECT replayurl, recordingstart, recordingend, viewercount, userid, idx, streamname, nickname, userlogo, duration
+    SELECT replayurl, recordingstart, recordingend, viewercount, userid, idx, streamname, username, userlogo, duration
     FROM godview
     WHERE idx = :idx
     """
@@ -504,7 +534,7 @@ async def post_replay_detail(idx: int):
         "viewer_count": result['viewercount'],
         "userid": result['userid'],
         "idx": result['idx'],
-        "nickname": result['nickname'],
+        "username": result['username'],
         "userlogo": result['userlogo'],
         "duration": result['duration'],
         "streamname": result['streamname']
@@ -535,7 +565,7 @@ async def create_chat_token(channelid : str):
 @app.get("/api/replay/recent")
 async def get_recent_replay():
     query = """
-    SELECT idx, userid, channelid, replayurl, recordingstart, recordingend, viewercount, streamname, nickname, userlogo
+    SELECT idx, userid, channelid, replayurl, recordingstart, recordingend, viewercount, streamname, username, userlogo
     FROM godview
     ORDER BY idx DESC
     LIMIT 20
@@ -544,3 +574,314 @@ async def get_recent_replay():
     if not result:
         return []
     return result
+
+# 팔로우 키
+@app.post("/api/follow")
+async def select_follow(body: FollowRequest):
+    userid = body.userid
+    target_userid = body.target_userid
+
+    # userid를 사용하여 현재 사용자 데이터 가져오기
+    user_response = table.get_item(Key={'userid': userid})
+    user = user_response.get('Item')
+
+    if not user:
+        return []
+
+    # target_userid를 사용하여 대상 사용자 데이터 가져오기
+    target_user_response = table.get_item(Key={'userid': target_userid})
+    target_user = target_user_response.get('Item')
+
+    if not target_user:
+        return []
+
+    # follow 리스트 업데이트
+    user_following = user.get('follow', [])
+    if target_userid in user_following:
+        # 이미 팔로우 하고 있다면 제거
+        user_following.remove(target_userid)
+        action = 'unfollow'
+        # target의 followers 수 감소
+        target_followers_count = target_user.get('followers', 0)
+        if target_followers_count > 0:
+            target_followers_count -= 1
+    else:
+        # 팔로우하지 않았다면 추가
+        user_following.append(target_userid)
+        action = 'follow'
+        # target의 followers 수 증가
+        target_followers_count = target_user.get('followers', 0) + 1
+
+    # DynamoDB에 사용자의 follow 리스트 업데이트
+    table.update_item(
+        Key={'userid': userid},
+        UpdateExpression="set follow = :val",
+        ExpressionAttributeValues={
+            ':val': user_following
+        }
+    )
+
+    # DynamoDB에 대상 사용자의 followers 수 업데이트
+    table.update_item(
+        Key={'userid': target_userid},
+        UpdateExpression="set followers = :val",
+        ExpressionAttributeValues={
+            ':val': target_followers_count
+        }
+    )
+
+    return {
+        "userid": userid,
+        "updated_following": user_following,
+        "action": action,
+        "target_userid": target_userid,
+        "target_followers_count": target_followers_count
+    }
+
+# 팔로우 여부 
+@app.post("/api/follow/status")
+async def check_follow_status(body: FollowRequest):
+    userid = body.userid
+    target_userid = body.target_userid
+    user_response = table.get_item(Key={'userid': userid})
+    user = user_response.get('Item')
+
+    if not user:
+        return []
+
+    # target_userid를 사용하여 대상 사용자 데이터 가져오기
+    target_user_response = table.get_item(Key={'userid': target_userid})
+    target_user = target_user_response.get('Item')
+
+    if not target_user:
+        return []
+
+    # follow 리스트 확인
+    user_following = user.get('follow', [])
+    if target_userid in user_following:
+        action = 'follow'
+    else:
+        action = 'unfollow'
+
+    return {
+        "action": action
+    }
+
+# 팔로우 리스트
+@app.post("/api/follow/list")
+async def get_follow_list(body: FollowListRequest):
+    # isstream 값이 1인 모든 사용자 검색
+    query_response = table.query(
+        IndexName='isstream-index',  # 글로벌 보조 인덱스 이름
+        KeyConditionExpression=Key('isstream').eq(1),
+        ProjectionExpression="userid, username, userlogo, channelid"
+    )
+    
+    # 조회된 항목에서 사용자 정보 추출
+    users_with_stream = query_response.get('Items', [])
+    
+    # 사용자의 팔로우 리스트와 비교
+    userid = body.userid
+    user_response = table.get_item(Key={'userid': userid}, ProjectionExpression="follow")
+    user = user_response.get('Item')
+
+    if not user or 'follow' not in user:
+        return []
+    
+    follow_list = user['follow']
+    base_arn = os.getenv('BASE_ARN')
+    
+    # 사용자의 팔로우 리스트와 isstream이 1인 사용자 목록 비교 및 시청자 수 조회
+    follow_details_streaming = []
+    for user in users_with_stream:
+        if user['userid'] in follow_list:
+            full_channel_arn = f"{base_arn}/{user['channelid']}"
+            try:
+                ivs_response = ivs_client.get_stream(channelArn=full_channel_arn)
+                viewer_count = ivs_response['stream'].get('viewerCount', 0)
+            except:
+                viewer_count = 0
+            user['viewerCount'] = viewer_count
+            follow_details_streaming.append(user)
+
+    # 시청자 수에 따라 내림차순 정렬
+    sorted_follow_details_streaming = sorted(follow_details_streaming, key=lambda x: x['viewerCount'], reverse=True)
+    
+    return sorted_follow_details_streaming
+
+# 글 쓰기
+@app.post("/api/board/")
+async def create_board(board: boardcreate):
+    query = """
+    INSERT INTO board (authorid, content) VALUES (:authorid, :content)
+    """
+    values = {"authorid": board.authorid, "content": board.content}
+    try:
+        await database.execute(query=query, values=values)
+        return {"status": "success", "data": board}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# 댓글,대댓글 쓰기
+@app.post("/api/reply/")
+async def create_reply(reply: replycreate):
+    query = """
+    INSERT INTO reply (boardid, parentreplyid, authorid, reply ) VALUES (:boardid, :parentreplyid, :authorid, :reply )
+    """
+    values = {"boardid": reply.boardid, "parentreplyid": reply.parentreplyid, "authorid": reply.authorid, "reply": reply.reply}
+    try:
+        await database.execute(query=query, values=values)
+        return {"status": "success", "data": reply}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
+# 글 삭제
+@app.delete("/api/board/{boardid}")
+async def delete_board(boardid: int):
+    query = "DELETE FROM board WHERE boardid = :boardid"
+    values = {"boardid": boardid}
+    try:
+        result = await database.execute(query=query, values=values)
+        if result:
+            return {"status": "success"}
+        raise HTTPException(status_code=404, detail="Board not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 댓글 삭제
+@app.delete("/api/reply/{replyid}")
+async def delete_reply(replyid: int):
+    query = "DELETE FROM reply WHERE replyid = :replyid"
+    values = {"replyid": replyid}
+    try:
+        result = await database.execute(query=query, values=values)
+        if result:
+            return {"status": "success"}
+        raise HTTPException(status_code=404, detail="Reply not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 글 조회
+# ?page=1 최근 5개
+@app.post("/api/user/{authorid}/community")
+async def post_community(authorid: str, page: int = Query(1, gt=0)):
+    items_per_page = 5
+    offset = (page - 1) * items_per_page
+
+    # 데이터 개수를 계산하는 쿼리
+    count_query = "SELECT COUNT(authorid) AS count FROM boardview WHERE authorid = :authorid"
+    total_count_result = await database.fetch_one(count_query, {"authorid": authorid})
+    total_count = total_count_result['count']
+
+    # 페이지 수 계산
+    total_pages = (total_count + items_per_page - 1) // items_per_page
+
+    query = """
+    SELECT boardid, authorid, content, time, userlogo, replycount, username
+    FROM boardview
+    WHERE authorid = :authorid
+    ORDER BY boardid DESC
+    LIMIT :limit OFFSET :offset
+    """
+    result = await database.fetch_all(query, {"authorid": authorid, "limit": items_per_page, "offset": offset})
+    if not result:
+        return {"total_pages": total_pages, "data": []}
+
+    formatted_result = [{
+        "boardid": r['boardid'],
+        "authorid": r['authorid'],
+        "content": r['content'],
+        "time": r['time'],
+        "userlogo": r['userlogo'],
+        "replycount": r['replycount'],
+        "username": r['username']
+    } for r in result]
+
+    return {"total_pages": total_pages, "data": formatted_result}
+
+# 글 조회
+@app.post("/api/community/{boardid}")
+async def post_community_detail(boardid: int):
+    query = """
+    SELECT boardid, time, userlogo, username, authorid, content, replycount
+    FROM boardview
+    WHERE boardid = :boardid
+    """
+    result = await database.fetch_all(query, values={"boardid": boardid})
+    if not result:
+        return []
+    return result
+
+# 댓글 조회
+@app.post("/api/community/{boardid}/reply")
+async def post_community_detail(boardid: int):
+    query = """
+    SELECT replyid, boardid, parentreplyid, reply, time, userlogo, authorid, username
+    FROM replyview
+    WHERE boardid = :boardid
+    ORDER BY replyid 
+    """
+    result = await database.fetch_all(query, values={"boardid": boardid})
+    if not result:
+        return []
+    return result
+
+# 채널 벤 리스트
+@app.post("/api/channel/listban")
+async def get_channel_listban():
+    response = table.query(
+        IndexName='iscensor-index',
+        KeyConditionExpression=Key('iscensor').eq(1),
+        ProjectionExpression='username, channelid, streamname, userlogo, userid, censorlist, streamkey'
+    )
+    items = response.get('Items', [])
+
+    if items:
+        return items
+    else:
+        return []
+
+# 스트림 키 삭제 (채널 벤)
+@app.post("/api/channel/ban/{streamkey}")
+async def get_channel_ban(streamkey: str):
+    base_arn = os.getenv('BASE_STREAM_ARN')
+    
+    input = {
+        'arn' : f'{base_arn}/{streamkey}'
+        }
+    ivs_client.delete_stream_key(**input)
+    
+
+    return ("스트림 키 삭제")
+
+# 스트림 키 생성 (unban)
+@app.post("/api/channel/unban/{channelid}")
+async def get_channel_ban(channelid: str):
+    try:
+        base_arn = os.getenv('BASE_ARN')
+        # 스트림 키 생성
+        create_stream_key_response = ivs_client.create_stream_key(
+            channelArn=f'{base_arn}/{channelid}'
+        )
+        # 생성된 스트림 키
+        stream_key = create_stream_key_response['streamKey']['value']
+
+        # DynamoDB 쿼리 및 갱신
+        response = table.query(
+            IndexName='channelid-index',
+            KeyConditionExpression=Key('channelid').eq(channelid)
+        )
+
+        for item in response['Items']:
+            table.update_item(
+                Key={'userid': item['userid']},
+                UpdateExpression='SET streamkey = :val1, iscensor = :val2',
+                ExpressionAttributeValues={
+                    ':val1': stream_key,
+                    ':val2': 0,
+                }
+            )
+        return Response(content='성공', status_code=200)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
