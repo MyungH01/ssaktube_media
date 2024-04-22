@@ -22,6 +22,7 @@ jobs:
           echo "SECRET_ACCESS_KEY=${{ secrets.SECRET_ACCESS_KEY }}" >> .env
           echo "IMAGE_REPO=${{ secrets.IMAGE_REPO }}" >> .env
           echo "ECR_REGISTRY=${{ secrets.ECR_REGISTRY }}" >> .env
+          echo "BASE_STREAM_ARN=${{ secrets.BASE_STREAM_ARN }}" >> .env
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
