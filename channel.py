@@ -117,7 +117,7 @@ def create_channel(body: ChannelCreate):
 
         create_response = ivs_cog_client.create_channel(
             name=channel_name,
-            type='STANDARD',  # BASIC, STANDARD, ADVANCED_SD, ADVANCED_HD 중 선택
+            type='ADVANCED_HD',  # BASIC, STANDARD, ADVANCED_SD, ADVANCED_HD 중 선택
             recordingConfigurationArn= recording_configuration_arn
         )
         # 생성된 채널의 스트림 키 및 기타 정보 추출
