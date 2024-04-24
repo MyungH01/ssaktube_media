@@ -549,7 +549,9 @@ async def create_chat_token(channelid : str):
     )
     items = response.get('Items', [])
 
-    client = boto3.client('ivschat')
+    client = boto3.client('ivschat', aws_access_key_id=os.getenv('ACCESS_KEY'),
+                          aws_secret_access_key=os.getenv('SECRET_ACCESS_KEY'),
+                          region_name=os.getenv('REGION'))
 
     input = {
             'capabilities' : ['SEND_MESSAGE','DISCONNECT_USER','DELETE_MESSAGE'],
