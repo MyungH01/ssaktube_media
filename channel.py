@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 import boto3
@@ -34,6 +34,11 @@ class replycreate(BaseModel):
     parentreplyid: Optional[int] = None 
     authorid: str
     reply: str
+
+class ban(BaseModel):
+    streamkey: str
+    channelid: str
+
 
 load_dotenv()
 
@@ -101,7 +106,7 @@ def create_channel(body: ChannelCreate):
     user_item = user_response.get('Item')
 
     # iscensor 값이 1이면 채널 생성 중단
-    if user_item and user_item.get('iscensor', 0) == 1:
+    if user_item and user_item.get('isban', 0) == 1:
         return {"Can't create channel"}
 
     ivs_cog_client = aws_credentials(id_token)
@@ -549,9 +554,7 @@ async def create_chat_token(channelid : str):
     )
     items = response.get('Items', [])
 
-    client = boto3.client('ivschat', aws_access_key_id=os.getenv('ACCESS_KEY'),
-                          aws_secret_access_key=os.getenv('SECRET_ACCESS_KEY'),
-                          region_name=os.getenv('REGION'))
+    client = boto3.client('ivschat')
 
     input = {
             'capabilities' : ['SEND_MESSAGE','DISCONNECT_USER','DELETE_MESSAGE'],
@@ -827,10 +830,9 @@ async def post_community_detail(boardid: int):
     if not result:
         return []
     return result
-
-# 채널 벤 리스트
-@app.post("/api/channel/listban")
-async def get_channel_listban():
+# 경고 채널 리스트
+@app.post("/api/channel/censorlist")
+async def get_channel_censorlist():
     response = table.query(
         IndexName='iscensor-index',
         KeyConditionExpression=Key('iscensor').eq(1),
@@ -842,17 +844,46 @@ async def get_channel_listban():
         return items
     else:
         return []
+# 벤 채널 리스트
+@app.post("/api/channel/banlist")
+async def get_channel_banlist():
+    response = table.query(
+        IndexName='isban-index',
+        KeyConditionExpression=Key('isban').eq(1),
+        ProjectionExpression='username, channelid, streamname, userlogo, userid, censorlist, streamkey'
+    )
+    items = response.get('Items', [])
+
+    if items:
+        return items
+    else:
+        return []
 
 # 스트림 키 삭제 (채널 벤)
-@app.post("/api/channel/ban/{streamkey}")
-async def get_channel_ban(streamkey: str):
+@app.post("/api/channel/ban")
+async def get_channel_ban(ban: ban):
     base_arn = os.getenv('BASE_STREAM_ARN')
     
     input = {
-        'arn' : f'{base_arn}/{streamkey}'
+        'arn' : f'{base_arn}/{ban.streamkey}'
         }
     ivs_client.delete_stream_key(**input)
     
+    # DynamoDB 쿼리 및 갱신
+    response = table.query(
+        IndexName='channelid-index',
+        KeyConditionExpression=Key('channelid').eq(ban.channelid)
+    )
+
+    for item in response['Items']:
+        table.update_item(
+            Key={'userid': item['userid']},
+            UpdateExpression='SET iscensor = :val1, isban = :val2',
+            ExpressionAttributeValues={
+                ':val1': int(0),
+                ':val2': int(1),
+            }
+        )
 
     return ("스트림 키 삭제")
 
@@ -877,10 +908,10 @@ async def get_channel_ban(channelid: str):
         for item in response['Items']:
             table.update_item(
                 Key={'userid': item['userid']},
-                UpdateExpression='SET streamkey = :val1, iscensor = :val2',
+                UpdateExpression='SET streamkey = :val1, isban = :val2',
                 ExpressionAttributeValues={
                     ':val1': stream_key,
-                    ':val2': 0,
+                    ':val2': int(0),
                 }
             )
         return Response(content='성공', status_code=200)
