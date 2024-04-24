@@ -562,8 +562,8 @@ async def create_chat_token(channelid : str):
     return ({'chatToken' : response_chat['token']})
 
 # 최근 저장된 영상 전체 다시보기 정보 20개
-@app.get("/api/replay/recent")
-async def get_recent_replay():
+@app.get("/api/vod/recent")
+async def get_recent_vod():
     query = """
     SELECT idx, userid, channelid, replayurl, recordingstart, recordingend, viewercount, streamname, username, userlogo
     FROM godview
