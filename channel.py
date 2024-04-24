@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi import FastAPI, HTTPException, Query,Response
 from pydantic import BaseModel
 from typing import Optional
 import boto3
@@ -554,7 +554,7 @@ async def create_chat_token(channelid : str):
     )
     items = response.get('Items', [])
 
-    client = boto3.client('ivschat', aws_access_key_id=os.getenv('ACCESS_KEY'),
+    client = boto3.client('ivschat',aws_access_key_id=os.getenv('ACCESS_KEY'),
                           aws_secret_access_key=os.getenv('SECRET_ACCESS_KEY'),
                           region_name=os.getenv('REGION'))
 
@@ -832,6 +832,7 @@ async def post_community_detail(boardid: int):
     if not result:
         return []
     return result
+
 # 경고 채널 리스트
 @app.post("/api/channel/censorlist")
 async def get_channel_censorlist():
@@ -864,13 +865,20 @@ async def get_channel_banlist():
 # 스트림 키 삭제 (채널 벤)
 @app.post("/api/channel/ban")
 async def get_channel_ban(ban: ban):
-    base_arn = os.getenv('BASE_STREAM_ARN')
-    
+    base_stream = os.getenv('BASE_STREAM_ARN')
+    base_arn = os.getenv('BASE_ARN')
+    try:
+        input = {
+            'channelArn' : f'{base_arn}/{ban.channelid}'
+            }
+        ivs_client.stop_stream(**input)
+    except: pass
+
     input = {
-        'arn' : f'{base_arn}/{ban.streamkey}'
+        'arn' : f'{base_stream}/{ban.streamkey}'
         }
     ivs_client.delete_stream_key(**input)
-    
+
     # DynamoDB 쿼리 및 갱신
     response = table.query(
         IndexName='channelid-index',
@@ -880,10 +888,11 @@ async def get_channel_ban(ban: ban):
     for item in response['Items']:
         table.update_item(
             Key={'userid': item['userid']},
-            UpdateExpression='SET iscensor = :val1, isban = :val2',
+            UpdateExpression='SET iscensor = :val1, isban = :val2, censorlist = :val3',
             ExpressionAttributeValues={
                 ':val1': int(0),
                 ':val2': int(1),
+                ':val3': [],
             }
         )
 
@@ -916,7 +925,7 @@ async def get_channel_ban(channelid: str):
                     ':val2': int(0),
                 }
             )
-        return Response(content='성공', status_code=200)
+        return ('status_code=200')
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
