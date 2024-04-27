@@ -320,13 +320,13 @@ async def startup():
 async def shutdown():
     await database.disconnect()
 
-# 전체 방송인 다시보기 페이지 24시간 동안 인기순으로 - 60개 
+# 전체 방송인 다시보기 페이지 3주 동안 인기순으로 - 60개 
 @app.get("/api/replays")
 async def get_all_replay():
     query = """
     SELECT idx, userid, channelid, replayurl, recordingstart, recordingend, viewercount, streamname, username, userlogo
     FROM replayview
-    WHERE recordingend >= date_sub(now(), interval 7 day) and  recordingend < now()
+    WHERE recordingend >= date_sub(now(), interval 21 day) and  recordingend < now()
     ORDER BY viewercount DESC
     LIMIT 60;
     """
